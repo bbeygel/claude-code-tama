@@ -17,7 +17,7 @@ Requires Claude Code v2.1.287 or later (mods).
 - In the pane: `f` Feed, `s` Sleep/Wake, `p` Play, `Esc` close. Tab moves between buttons, Enter presses.
 - `/pet name <name>` renames it.
 - `/pet creature <description>` has a model draw your pet as that creature (one Opus call). `/pet creature default` restores it. Past the egg, a change restarts your pet as an egg (name kept), so you run it twice to confirm.
-- `/feed`, `/sleep`, `/wake` work anywhere.
+- `/feed`, `/sleep`, `/wake`, `/play` work anywhere.
 
 ## Known issue
 
