@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { type Grave, type Pet, ACTION_MS, CH, CW, STAGES, DEATH_AFTER, FRAME, advance, bury, care, face, feed, grid, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, pack, parseCreature, quipIndex, stage } from './tama'
+import { type Grave, type Pet, ACTION_MS, CH, CW, STAGES, DEATH_AFTER, FRAME, advance, bury, care, face, feed, grid, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, pack, parseCreature, quipIndex, rehatch, stage } from './tama'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -170,4 +170,14 @@ test('creature grids: a good drawing passes, wrong size or characters are reject
   const p = hatch(0)
   expect(lcd(p, HOUR, undefined, cr)).not.toEqual(lcd(p, HOUR))
   expect(lcd(p, 0, undefined, cr)).toEqual(lcd(p, 0)) // the egg stays the built-in
+})
+
+test('a creature change re-hatches a grown pet as an egg, keeping its name', () => {
+  const baby = { ...hatch(0), name: 'Molda', hunger: 40 }
+  const r = rehatch(baby, HOUR)
+  expect(stage(r, HOUR)).toBe('egg')
+  expect(r.name).toBe('Molda')
+  expect(r.hunger).toBe(80)
+  const egg = hatch(0)
+  expect(rehatch(egg, MIN)).toBe(egg)
 })

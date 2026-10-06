@@ -215,6 +215,9 @@ export const quipIndex = (now: number, count: number) => Math.floor(now / 20_000
 export const nameArg = (args: string) => /^name\s+(.+)$/.exec(args.trim())?.[1]?.trim().slice(0, 20)
 
 // `/pet creature <description>` -> the description, or 'default' to restore the built-in pet.
+// A new creature starts over as an egg, keeping its name; an egg stays as it is.
+export const rehatch = (p: Pet, now: number): Pet => (stage(p, now) === 'egg' ? p : { ...hatch(now), name: p.name })
+
 export const creatureArg = (args: string) => /^creature\s+(.+)$/.exec(args.trim())?.[1]?.trim().slice(0, 60)
 
 export const age = (ms: number) => {
