@@ -1,7 +1,7 @@
 import type { CommandRunInput, EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bar, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, parseCreature, play, quipIndex, stage, tomb } from './tama'
+import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bar, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, stage, tomb } from './tama'
 
 // Raw Ink color names; the band and the pane are where a mod can color (a command reply is plain text).
 const level = (n: number) => (n >= 60 ? 'green' : n >= 30 ? 'yellow' : 'red')
@@ -60,7 +60,7 @@ const draw = async ($: EngineInterface, desc: string) => {
     const r = await $.model.complete({ model: 'opus', prompt: drawPrompt(desc), maxTokens: 16000, effort: 'low', timeoutMs: 180_000 })
     if (!r.isAnswered) throw new Error(`the model gave no drawing (${r.reason})`)
     await $.store.set('creature', parseCreature(r.text, desc))
-    $.ui.invalidate('ui.render')
+    await change($, rehatch)
     $.ui.toast(`Tama is now ${desc}!`)
   } catch (err) {
     $.ui.toast(`Tama could not change into ${desc}: ${err instanceof Error ? err.message : err}. Kept the old look.`)
@@ -88,6 +88,10 @@ const openPane = async ($: EngineInterface, e: CommandRunInput) => {
   if (isPlaced) anim ??= $.clock.every(FRAME, () => $.ui.invalidate('ui.render')) // the bob; ui.close stops it
   return isPlaced
 }
+
+// A creature change re-hatches the pet, so past the egg it is asked twice: the
+// first run warns, the same command again goes ahead. Per session.
+let pending: string | undefined
 
 const quip = (now: number, name: string) => QUIPS[quipIndex(now, QUIPS.length)]?.replaceAll('Tama', name)
 
@@ -127,7 +131,15 @@ export const register: Register = on => {
       return { text: [...headstone(b.graves[0]!), '', 'A new egg appears.', ...(shown ? [] : [card(b.pet, now, b.graves)])].join('\n') }
     }
     const desc = creatureArg(e.args)
-    if (desc === 'default') await $.store.delete('creature')
+    if (desc) {
+      const p = await load($, now)
+      if (stage(p, now) !== 'egg' && pending !== desc) {
+        pending = desc
+        return { text: `Changing the creature resets ${p.name} to an egg. Run /pet ${e.args.trim()} again to confirm.` }
+      }
+      pending = undefined
+    }
+    if (desc === 'default') await $.store.delete('creature').then(() => change($, rehatch))
     else if (desc) void draw($, desc)
     const note = desc === 'default' ? 'Tama is back to its own shape.' : desc ? `Tama is changing into ${desc}…` : ''
     const name = nameArg(e.args)
