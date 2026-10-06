@@ -1,0 +1,14 @@
+name: Feature
+description: An idea for Tama
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like Tama to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why? What would it be like to use?

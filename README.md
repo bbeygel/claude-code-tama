@@ -22,3 +22,7 @@ Requires Claude Code v2.1.287 or later (mods).
 ## Known issue
 
 In terminals using the kitty keyboard protocol (Ghostty, cmux), the letter hotkeys don't fire. Use Tab and Enter.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). MIT licensed, see [LICENSE](LICENSE).
