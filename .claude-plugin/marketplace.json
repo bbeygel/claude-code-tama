@@ -1,0 +1,12 @@
+{
+  "name": "claude-code-tama",
+  "description": "Tama, a Tamagotchi companion mod for Claude Code",
+  "owner": { "name": "beygel" },
+  "plugins": [
+    {
+      "name": "tama",
+      "source": "./",
+      "description": "Tamagotchi companion: fed by finished turns, shown above the prompt and in the spinner, /pet for its device"
+    }
+  ]
+}

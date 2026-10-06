@@ -1,7 +1,26 @@
-import type { EngineInterface, Register } from 'claude-code'
+import type { CommandRunInput, EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Grave, type Pet, advance, bar, bury, card, face, feed, hatch, headstone, isDead, moodBy, nameArg, quipIndex, speech, tomb } from './tama'
+import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bar, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, parseCreature, play, quipIndex, speech, stage, tomb } from './tama'
+
+// Raw Ink color names; the band and the pane are where a mod can color (a command reply is plain text).
+const level = (n: number) => (n >= 60 ? 'green' : n >= 30 ? 'yellow' : 'red')
+const FACE_COLOR: Record<ReturnType<typeof mode>, string> = {
+  happy: 'magenta', watching: 'cyan', sad: 'blue', tired: 'yellow', hungry: 'red', asleep: 'gray', fainted: 'red',
+}
+
+// The /pet pane: an egg-shaped device, 29 cells at its widest, 21 rows.
+const PANE = 'tama'
+const SHELL = '#f48fb1'
+const METERS = [['hunger', '♨', 'food'], ['energy', '☾', 'energy'], ['mood', '♥', 'mood']] as const
+const center = (s: string, w: number) => {
+  const t = s.slice(0, w)
+  return t.padStart(Math.floor((w + t.length) / 2)).padEnd(w)
+}
+// ponytail: a module variable, so a hot reload with the pane up leaves the pet still until /pet again.
+let anim: Timer | undefined
+// The running Feed/Play animation; lcd ignores it once ACTION_MS have passed.
+let action: Action | undefined
 
 // Defaults under the stored value, so a field added later reads its default.
 const load = async ($: EngineInterface, now: number) =>
@@ -18,10 +37,56 @@ const change = async ($: EngineInterface, fn: (p: Pet, now: number) => Pet) => {
   return { before, after, now }
 }
 
-// /feed, /sleep, /wake: a dead pet answers for all three.
-const act = async ($: EngineInterface, fn: (p: Pet) => Pet, line: (b: Pet, a: Pet, now: number) => string) => {
+// /feed, /sleep, /wake and the pane's buttons: a dead pet answers for all.
+const act = async ($: EngineInterface, fn: (p: Pet) => Pet, line: (b: Pet, a: Pet, now: number) => string, kind?: Action['kind']) => {
   const { before, after, now } = await change($, fn)
+  // Animate only accepted actions, and only with the pane up (anim); a faster tick runs just meanwhile.
+  if (kind && anim && !isDead(before, now) && !(kind === 'play' && (before.asleep || before.faintedAt !== null))) {
+    action = { kind, startedAt: now }
+    const t = $.clock.every(ACTION_FRAME, () => $.ui.invalidate('ui.render'))
+    $.clock.after(ACTION_MS + ACTION_FRAME, () => t.cancel())
+  }
   return { text: isDead(before, now) ? `${before.name} is gone.` : line(before, after, now) }
+}
+const fed = (b: Pet, a: Pet, now: number) =>
+  `${face(a, now, false)} ${b.name} ${b.faintedAt !== null ? 'comes round and eats!' : b.hunger >= 90 ? 'is stuffed and grumpy.' : 'munches happily.'}`
+const lights = (b: Pet, a: Pet, now: number) => `${face(a, now, false)} ${a.asleep ? `Lights off. ${a.name} is asleep.` : `${a.name} is up.`}`
+const played = (b: Pet, a: Pet, now: number) =>
+  `${face(a, now, false)} ${a.name} ${b.asleep ? 'is asleep.' : b.faintedAt !== null ? 'is out cold. Feed it!' : 'plays! mood +10'}`
+
+// Asks a model to draw the creature; the pet changes only if every grid checks out.
+const draw = async ($: EngineInterface, desc: string) => {
+  try {
+    const r = await $.model.complete({ model: 'opus', prompt: drawPrompt(desc), maxTokens: 16000, effort: 'low', timeoutMs: 180_000 })
+    if (!r.isAnswered) throw new Error(`the model gave no drawing (${r.reason})`)
+    await $.store.set('creature', parseCreature(r.text, desc))
+    $.ui.invalidate('ui.render')
+    $.ui.toast(`Tama is now ${desc}!`)
+  } catch (err) {
+    $.ui.toast(`Tama could not change into ${desc}: ${err instanceof Error ? err.message : err}. Kept the old look.`)
+  }
+}
+
+const graves = async ($: EngineInterface) => ((await $.store.get('graves')) as Grave[] | undefined) ?? []
+
+// A dead pet: its grave dug and a fresh egg laid. Undefined while it lives.
+const burial = async ($: EngineInterface, now: number) => {
+  const p = await load($, now)
+  if (!isDead(p, now)) return
+  const b = bury(p, await graves($), now)
+  await $.store.set('pet', b.pet)
+  await $.store.set('graves', b.graves)
+  $.ui.invalidate('ui.render')
+  return b
+}
+
+// The pane only where it draws: /pet typed at a terminal. Remote Control (bridge), -p and
+// VS Code (sdk), or a pane left unplaced, answer false and the caller prints the card.
+const openPane = async ($: EngineInterface, e: CommandRunInput) => {
+  if (e.origin.kind !== 'composer' || !(await $.session.surfaces()).includes('terminal')) return false
+  const { isPlaced } = await $.ui.open({ id: PANE, title: 'Tama', focus: true, closeOnEscape: true, rows: 21, columns: 31 })
+  if (isPlaced) anim ??= $.clock.every(FRAME, () => $.ui.invalidate('ui.render')) // the bob; ui.close stops it
+  return isPlaced
 }
 
 // Muted while it sleeps or lies fainted; speech failing never breaks a hook.
@@ -35,7 +100,7 @@ const say = async ($: EngineInterface, p: Pet, text: string) => {
 const quip = (now: number, name: string) => QUIPS[quipIndex(now, QUIPS.length)]?.replaceAll('Tama', name)
 
 const COMMANDS = [
-  { name: 'pet', description: "Tama's status card", argumentHint: '[name <name>]', immediate: true },
+  { name: 'pet', description: "Open Tama's device (its card where no pane draws)", argumentHint: '[name <name> | creature <description> | creature default]', immediate: true },
   { name: 'feed', description: 'Feed Tama', immediate: true },
   { name: 'sleep', description: 'Lights off: Tama sleeps', immediate: true },
   { name: 'wake', description: 'Lights on: wake Tama', immediate: true },
@@ -70,29 +135,98 @@ export const register: Register = on => {
 
   on('command.run', { command: 'pet' }, async ($, e) => {
     const now = await $.clock.now()
-    const dead = await load($, now)
-    if (isDead(dead, now)) {
-      const b = bury(dead, ((await $.store.get('graves')) as Grave[] | undefined) ?? [], now)
-      await $.store.set('pet', b.pet)
-      await $.store.set('graves', b.graves)
-      $.ui.invalidate('ui.render')
-      return { text: [...headstone(b.graves[0]!), '', 'A new egg appears.', card(b.pet, now, b.graves)].join('\n') }
+    const b = await burial($, now)
+    if (b) {
+      const shown = await openPane($, e)
+      return { text: [...headstone(b.graves[0]!), '', 'A new egg appears.', ...(shown ? [] : [card(b.pet, now, b.graves)])].join('\n') }
     }
+    const desc = creatureArg(e.args)
+    if (desc === 'default') await $.store.delete('creature')
+    else if (desc) void draw($, desc)
+    const note = desc === 'default' ? 'Tama is back to its own shape.' : desc ? `Tama is changing into ${desc}…` : ''
     const name = nameArg(e.args)
     if (name) await change($, p => ({ ...p, name }))
-    return { text: card(await load($, now), now, ((await $.store.get('graves')) as Grave[] | undefined) ?? []) }
+    if (await openPane($, e)) return note ? { text: note } : {}
+    return { text: [...(note ? [note] : []), card(await load($, now), now, await graves($))].join('\n') }
   })
 
-  on('command.run', { command: 'feed' }, $ =>
-    act($, feed, (b, a, now) =>
-      `${face(a, now, false)} ${b.name} ${b.faintedAt !== null ? 'comes round and eats!' : b.hunger >= 90 ? 'is stuffed and grumpy.' : 'munches happily.'}`),
-  )
+  on('command.run', { command: 'feed' }, $ => act($, feed, fed, 'feed'))
+  on('command.run', { command: 'sleep' }, $ => act($, p => ({ ...p, asleep: true }), lights))
+  on('command.run', { command: 'wake' }, $ => act($, p => ({ ...p, asleep: false }), lights))
 
-  on('command.run', { command: 'sleep' }, $ =>
-    act($, p => ({ ...p, asleep: true }), (b, a, now) => `${face(a, now, false)} Lights off. ${a.name} is asleep.`),
-  )
+  on('ui.close', { id: PANE }, ($, e, next) => {
+    anim?.cancel()
+    anim = undefined
+    return next(e)
+  })
 
-  on('command.run', { command: 'wake' }, $ => act($, p => ({ ...p, asleep: false }), (b, a, now) => `${face(a, now, false)} ${a.name} is up.`))
+  // The device: shell rows around an LCD, meters and three buttons. Off the terminal, or
+  // narrower than the egg, the card's lines and the same buttons.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const now = await $.clock.now()
+    const p = await load($, now)
+    const dead = isDead(p, now)
+    const cr = (await $.store.get('creature')) as Creature | undefined
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const press = (run: () => Promise<{ text: string }>) => async () => $.ui.toast((await run()).text)
+    const buttons = dead ? (
+      <Button key="bury" label="New egg" hotkey="b" plain autoFocus onPress={async () => void ((await burial($, await $.clock.now())) && $.ui.toast('A new egg appears.'))} />
+    ) : (
+      <Box columnGap={1}>
+        <Button key="feed" label="Feed" hotkey="f" plain autoFocus onPress={press(() => act($, feed, fed, 'feed'))} />
+        <Button key="sleep" label={p.asleep ? 'Wake' : 'Sleep'} hotkey="s" plain onPress={press(() => act($, q => ({ ...q, asleep: !q.asleep }), lights))} />
+        <Button key="play" label="Play" hotkey="p" plain onPress={press(() => act($, play, played, 'play'))} />
+      </Box>
+    )
+    if (e.surface !== 'terminal' || e.props.bodyColumns < 29)
+      return (
+        <Box flexDirection="column">
+          {(dead ? headstone(tomb(p)) : card(p, now).split('\n')).map(l => (
+            <Text>{l}</Text>
+          ))}
+          {buttons}
+        </Box>
+      )
+    const rim = (l: string, r: string, mid: RenderElement) => (
+      <Box>
+        <Text color={SHELL}>{l}</Text>
+        {mid}
+        <Text color={SHELL}>{r}</Text>
+      </Box>
+    )
+    const [bg, ink] = dead ? ['#9e9e9e', '#212121'] : p.asleep ? ['#1e3a1e', '#8bac0f'] : ['#9bbc0f', '#0f380f'] // lights off: dark LCD
+    return (
+      <Box flexDirection="column" alignItems="center" width={e.props.bodyColumns}>
+        <Text color={SHELL}>{`╭${'─'.repeat(15)}╮`}</Text>
+        {rim('╭──╯', '╰──╮', <Text color={SHELL} bold>{center('T A M A', 15)}</Text>)}
+        {rim('╭─╯', '╰─╮', <Text bold>{center(`${p.name} · ${dead ? 'RIP' : stage(p, now)}`, 21)}</Text>)}
+        {rim('╭╯', '╰╮', <Text dimColor>{center(dead ? 'rest in peace' : `age ${age(now - p.born)} · care ${care(p, now)}%`, 25)}</Text>)}
+        {rim('│  ┌', '┐  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
+        {lcd(p, now, action, cr).map(l =>
+          rim('│  │', '│  │', <Text color={ink} backgroundColor={bg}>{l.padEnd(21).slice(0, 21)}</Text>),
+        )}
+        {rim('│  └', '┘  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
+        {METERS.map(([k, icon, name]) => {
+          const n = Math.round(p[k] / 10)
+          return rim('│', '│', (
+            <Text>
+              {'  '}
+              <Text color={level(p[k])}>{icon}</Text>
+              {` ${name.padEnd(7)}`}
+              <Text color={level(p[k])}>{'█'.repeat(n)}</Text>
+              <Text dimColor>{'░'.repeat(10 - n)}</Text>
+              {` ${String(Math.round(p[k])).padStart(3)}  `}
+            </Text>
+          ))
+        })}
+        {rim('│', '│', <Text>{' '.repeat(27)}</Text>)}
+        {rim('╰╮', '╭╯', <Box width={25} justifyContent="center">{buttons}</Box>)}
+        {rim('╰─╮', '╭─╯', <Text dimColor>{center('tab · enter · esc', 21)}</Text>)}
+        {rim('╰──╮', '╭──╯', <Text>{' '.repeat(15)}</Text>)}
+        <Text color={SHELL}>{`╰${'─'.repeat(15)}╯`}</Text>
+      </Box>
+    )
+  })
 
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
     const now = await $.clock.now()
@@ -119,7 +253,16 @@ export const register: Register = on => {
       )
     return (
       <Box flexDirection="column">
-        <Text>{`${face(p, now, e.props.isWorking)} ${p.name}  hunger ${bar(p.hunger)}  energy ${bar(p.energy)}  mood ${bar(p.mood)}`}</Text>
+        <Box flexDirection="row">
+          <Text color={FACE_COLOR[mode(p, e.props.isWorking)]} bold>{`${face(p, now, e.props.isWorking)} `}</Text>
+          <Text color="cyan" bold>{p.name}</Text>
+          {(['hunger', 'energy', 'mood'] as const).map(k => (
+            <Text>
+              <Text dimColor>{`  ${k} `}</Text>
+              <Text color={level(p[k])}>{bar(p[k])}</Text>
+            </Text>
+          ))}
+        </Box>
         {e.props.isWorking || p.asleep ? null : <Text dimColor>{quip(now, p.name)}</Text>}
         {under}
       </Box>

@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { type Grave, type Pet, DEATH_AFTER, advance, bury, care, face, feed, hatch, headstone, isDead, mode, moodBy, nameArg, quipIndex, stage } from './tama'
+import { type Grave, type Pet, ACTION_MS, CH, CW, STAGES, DEATH_AFTER, FRAME, advance, bury, care, face, feed, grid, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, pack, parseCreature, quipIndex, stage } from './tama'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -138,4 +138,36 @@ test('/pet name and quip rotation', () => {
   expect(quipIndex(19_999, 40)).toBe(0)
   expect(quipIndex(20_000, 40)).toBe(1)
   expect(quipIndex(40 * 20_000, 40)).toBe(0)
+})
+
+test('pane LCD: braille pixel art, bob, tomb; a feed action animates then returns to idle', () => {
+  expect(pack(['#.#.', '##..', '.#..', '....', '.#', '..', '..', '..'])).toEqual(['⠳⠁', '⠈ '])
+  const p = hatch(0), at = HOUR
+  const idle = lcd(p, at)
+  expect(idle).toHaveLength(7)
+  expect(idle.every(l => l.length <= 21)).toBe(true)
+  expect(lcd(p, at + FRAME)[3]).not.toBe(idle[3]) // bobs one cell
+  const z = { ...p, asleep: true }
+  expect(lcd(z, at)[3]).toBe(lcd(z, at + FRAME)[3])
+  expect(lcd({ ...p, faintedAt: 0 }, DEATH_AFTER)[2]).toMatch(/[⠀-⣿]/)
+  const a = { kind: 'feed' as const, startedAt: at }
+  const frames = [0, 250, 1300, 2000].map(ms => lcd(p, at + ms, a).join('\n'))
+  expect(new Set(frames).size).toBe(4)
+  expect(lcd(p, at + ACTION_MS, a)).toEqual(lcd(p, at + ACTION_MS))
+})
+
+test('creature grids: a good drawing passes, wrong size or characters are rejected; the LCD uses it', () => {
+  const good = Array.from({ length: CH }, (_, y) => (y < 10 ? '.'.repeat(CW) : '#'.repeat(CW)))
+  expect(grid(good)).toEqual(good)
+  expect(grid(good.slice(1))).toBe(undefined) // too few rows
+  expect(grid(good.map(r => r + '.'))).toBe(undefined) // too wide
+  expect(grid(good.map((r, i) => (i === 12 ? r.replace('#', 'x') : r)))).toBe(undefined) // stray char
+  expect(grid(Array(CH).fill('.'.repeat(CW)))).toBe(undefined) // blank
+  const reply = '```json\n' + JSON.stringify(Object.fromEntries(STAGES.map(s => [s, good]))) + '\n```'
+  const cr = parseCreature(reply, 'a fox')
+  expect(() => parseCreature(reply.replace('baby', 'bab'), 'a fox')).toThrow('baby')
+  expect(() => parseCreature('sorry, no', 'a fox')).toThrow('JSON')
+  const p = hatch(0)
+  expect(lcd(p, HOUR, undefined, cr)).not.toEqual(lcd(p, HOUR))
+  expect(lcd(p, 0, undefined, cr)).toEqual(lcd(p, 0)) // the egg stays the built-in
 })
