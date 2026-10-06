@@ -1,7 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Pet, advance, bar, card, face, feed, hatch, isDead, moodBy, nameArg, quipIndex, speech } from './tama'
+import { type Grave, type Pet, advance, bar, bury, card, face, feed, hatch, headstone, isDead, moodBy, nameArg, quipIndex, speech, tomb } from './tama'
 
 // Defaults under the stored value, so a field added later reads its default.
 const load = async ($: EngineInterface, now: number) =>
@@ -12,10 +12,16 @@ const load = async ($: EngineInterface, now: number) =>
 const change = async ($: EngineInterface, fn: (p: Pet, now: number) => Pet) => {
   const now = await $.clock.now()
   const before = await load($, now)
-  const after = fn(before, now)
+  const after = isDead(before, now) ? before : fn(before, now) // nothing changes a dead pet
   await $.store.set('pet', after)
   $.ui.invalidate('ui.render')
   return { before, after, now }
+}
+
+// /feed, /sleep, /wake: a dead pet answers for all three.
+const act = async ($: EngineInterface, fn: (p: Pet) => Pet, line: (b: Pet, a: Pet, now: number) => string) => {
+  const { before, after, now } = await change($, fn)
+  return { text: isDead(before, now) ? `${before.name} is gone.` : line(before, after, now) }
 }
 
 // Muted while it sleeps or lies fainted; speech failing never breaks a hook.
@@ -63,32 +69,35 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'pet' }, async ($, e) => {
+    const now = await $.clock.now()
+    const dead = await load($, now)
+    if (isDead(dead, now)) {
+      const b = bury(dead, ((await $.store.get('graves')) as Grave[] | undefined) ?? [], now)
+      await $.store.set('pet', b.pet)
+      await $.store.set('graves', b.graves)
+      $.ui.invalidate('ui.render')
+      return { text: [...headstone(b.graves[0]!), '', 'A new egg appears.', card(b.pet, now, b.graves)].join('\n') }
+    }
     const name = nameArg(e.args)
     if (name) await change($, p => ({ ...p, name }))
-    const now = await $.clock.now()
-    return { text: card(await load($, now), now) }
+    return { text: card(await load($, now), now, ((await $.store.get('graves')) as Grave[] | undefined) ?? []) }
   })
 
-  on('command.run', { command: 'feed' }, async $ => {
-    const { before: b, after, now } = await change($, feed)
-    const line = isDead(b, now) ? 'is gone.' : b.faintedAt !== null ? 'comes round and eats!' : b.hunger >= 90 ? 'is stuffed and grumpy.' : 'munches happily.'
-    return { text: `${face(after, now, false)} ${b.name} ${line}` }
-  })
+  on('command.run', { command: 'feed' }, $ =>
+    act($, feed, (b, a, now) =>
+      `${face(a, now, false)} ${b.name} ${b.faintedAt !== null ? 'comes round and eats!' : b.hunger >= 90 ? 'is stuffed and grumpy.' : 'munches happily.'}`),
+  )
 
-  on('command.run', { command: 'sleep' }, async $ => {
-    const { after, now } = await change($, p => ({ ...p, asleep: true }))
-    return { text: `${face(after, now, false)} Lights off. ${after.name} is asleep.` }
-  })
+  on('command.run', { command: 'sleep' }, $ =>
+    act($, p => ({ ...p, asleep: true }), (b, a, now) => `${face(a, now, false)} Lights off. ${a.name} is asleep.`),
+  )
 
-  on('command.run', { command: 'wake' }, async $ => {
-    const { after, now } = await change($, p => ({ ...p, asleep: false }))
-    return { text: `${face(after, now, false)} ${after.name} is up.` }
-  })
+  on('command.run', { command: 'wake' }, $ => act($, p => ({ ...p, asleep: false }), (b, a, now) => `${face(a, now, false)} ${a.name} is up.`))
 
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
     const now = await $.clock.now()
     const p = await load($, now)
-    if (p.asleep) return next(e)
+    if (p.asleep || isDead(p, now)) return next(e)
     return next({ ...e, props: { ...e.props, suffix: `${e.props.suffix} · ${quip(now, p.name)}` } })
   })
 
@@ -99,6 +108,15 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const p = await load($, now)
     const { Box, Text } = $.ui.resolve(e)
+    if (isDead(p, now))
+      return (
+        <Box flexDirection="column">
+          {headstone(tomb(p)).map(l => (
+            <Text dimColor>{l}</Text>
+          ))}
+          {under}
+        </Box>
+      )
     return (
       <Box flexDirection="column">
         <Text>{`${face(p, now, e.props.isWorking)} ${p.name}  hunger ${bar(p.hunger)}  energy ${bar(p.energy)}  mood ${bar(p.mood)}`}</Text>

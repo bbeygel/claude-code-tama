@@ -13,8 +13,8 @@ export type Pet = {
 const MIN = 60_000
 const HOUR = 60 * MIN
 const DAY = 24 * HOUR
-// Death switch, off until the owner decides: a pet fainted this long dies (e.g. 12 * HOUR).
-export const DEATH_AFTER = Infinity
+// A pet fainted this long dies; Infinity switches death off.
+export const DEATH_AFTER = 24 * HOUR
 
 const clamp = (n: number) => Math.max(0, Math.min(100, n))
 
@@ -27,6 +27,7 @@ export const hatch = (now: number): Pet => ({
 export const advance = (p: Pet, now: number): Pet => {
   let { hunger, energy, mood, asleep, faintedAt, neglect, lastSeen } = p
   for (; lastSeen + MIN <= now; lastSeen += MIN) {
+    if (faintedAt !== null && lastSeen >= faintedAt + DEATH_AFTER) break // dead: its clock stops
     if (hunger === 0 || energy === 0) neglect += MIN // a minute that starts at 0 is neglected
     hunger = clamp(hunger - (asleep ? 1 / 12 : 1 / 6)) // 1 pt / 6 min awake, half that asleep
     energy = clamp(energy + (asleep ? 1 / 3 : -1 / 10)) // +1 / 3 min asleep, -1 / 10 min awake
@@ -39,8 +40,26 @@ export const advance = (p: Pet, now: number): Pet => {
 
 export const isDead = (p: Pet, now: number) => p.faintedAt !== null && now - p.faintedAt >= DEATH_AFTER
 
-export const feed = (p: Pet, now: number): Pet =>
-  isDead(p, now) ? p : { ...p, hunger: clamp(p.hunger + 25), mood: clamp(p.mood + (p.hunger >= 90 ? -5 : 2)), faintedAt: null }
+export type Grave = { name: string; stage: string; born: number; died: number }
+
+const label = (s: string) => (s === 'scruffy' ? 'scruffy adult' : s)
+
+export const tomb = (p: Pet): Grave => {
+  const died = (p.faintedAt ?? p.lastSeen) + DEATH_AFTER
+  return { name: p.name, stage: label(stage(p, died)), born: p.born, died }
+}
+
+// /pet on a dead pet: a fresh egg, and the newest 5 graves kept.
+export const bury = (p: Pet, graves: Grave[], now: number) => ({ pet: hatch(now), graves: [tomb(p), ...graves].slice(0, 5) })
+
+export const headstone = (g: Grave) => {
+  const rows = ['RIP', g.name, g.stage, age(g.died - g.born)]
+  const w = Math.max(...rows.map(r => r.length)) + 2
+  const mid = (r: string) => r.padStart(Math.floor((w + r.length) / 2)).padEnd(w)
+  return [` .${'-'.repeat(w - 2)}. `, `/${' '.repeat(w)}\\`, ...rows.map(r => `|${mid(r)}|`), `|${'_'.repeat(w)}|`]
+}
+
+export const feed = (p: Pet): Pet => ({ ...p, hunger: clamp(p.hunger + 25), mood: clamp(p.mood + (p.hunger >= 90 ? -5 : 2)), faintedAt: null })
 
 export const moodBy = (p: Pet, d: number): Pet => ({ ...p, mood: clamp(p.mood + d) })
 
@@ -52,9 +71,8 @@ export const stage = (p: Pet, now: number) => {
   return g < 10 * MIN ? 'egg' : g < DAY ? 'baby' : g < 3 * DAY ? 'child' : g < 7 * DAY ? 'teen' : care(p, now) >= 70 ? 'adult' : 'scruffy'
 }
 
-export const mode = (p: Pet, now: number, working: boolean) =>
-  isDead(p, now) ? 'dead'
-  : p.faintedAt !== null ? 'fainted'
+export const mode = (p: Pet, working: boolean) =>
+  p.faintedAt !== null ? 'fainted'
   : p.asleep ? 'asleep'
   : p.hunger < 30 ? 'hungry'
   : p.energy < 20 ? 'tired'
@@ -63,7 +81,7 @@ export const mode = (p: Pet, now: number, working: boolean) =>
   : 'happy'
 
 const EYES: Record<ReturnType<typeof mode>, string> = {
-  dead: '+_+', fainted: 'x_x', asleep: '-_-', hungry: '>_<', tired: '=_=', watching: 'o_o', sad: ';_;', happy: '^_^',
+  fainted: 'x_x', asleep: '-_-', hungry: '>_<', tired: '=_=', watching: 'o_o', sad: ';_;', happy: '^_^',
 }
 const FORMS: Record<ReturnType<typeof stage>, (e: string) => string> = {
   egg: () => '(  )',
@@ -75,7 +93,7 @@ const FORMS: Record<ReturnType<typeof stage>, (e: string) => string> = {
 }
 
 export const face = (p: Pet, now: number, working: boolean) => {
-  const m = mode(p, now, working)
+  const m = mode(p, working)
   return `${FORMS[stage(p, now)](EYES[m])}${m === 'asleep' ? ' zzz' : ''}`
 }
 
@@ -93,17 +111,18 @@ const age = (ms: number) => {
   return d ? `${d}d ${h % 24}h` : h ? `${h}h ${m % 60}m` : `${m}m`
 }
 
-export const card = (p: Pet, now: number) => {
+export const card = (p: Pet, now: number, graves: Grave[] = []) => {
   const s = stage(p, now)
   const r = Math.round
   return [
-    `${face(p, now, false)}  ${p.name} · ${s === 'scruffy' ? 'scruffy adult' : s} · ${p.asleep ? 'asleep' : 'awake'}`,
+    `${face(p, now, false)}  ${p.name} · ${label(s)} · ${p.asleep ? 'asleep' : 'awake'}`,
     `age     ${age(now - p.born)}`,
     `hunger  ${bar(p.hunger)} ${r(p.hunger)}`,
     `energy  ${bar(p.energy)} ${r(p.energy)}`,
     `mood    ${bar(p.mood)} ${r(p.mood)}`,
     `care    ${care(p, now)}%`,
-    ...(isDead(p, now) ? ['It is gone.'] : p.faintedAt !== null ? ['Fainted! /feed to revive.'] : []),
+    ...(p.faintedAt !== null ? ['Fainted! /feed to revive.'] : []),
     ...(s === 'egg' || s === 'baby' ? ['Name it: /pet name <name>'] : []),
+    ...(graves.length ? ['Graveyard', ...graves.map(g => `  ${g.name} · ${g.stage} · ${age(g.died - g.born)}`)] : []),
   ].join('\n')
 }
