@@ -1,7 +1,7 @@
 import type { CommandRunInput, EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bar, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, parseCreature, play, quipIndex, speech, stage, tomb } from './tama'
+import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bar, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, parseCreature, play, quipIndex, stage, tomb } from './tama'
 
 // Raw Ink color names; the band and the pane are where a mod can color (a command reply is plain text).
 const level = (n: number) => (n >= 60 ? 'green' : n >= 30 ? 'yellow' : 'red')
@@ -89,14 +89,6 @@ const openPane = async ($: EngineInterface, e: CommandRunInput) => {
   return isPlaced
 }
 
-// Muted while it sleeps or lies fainted; speech failing never breaks a hook.
-const say = async ($: EngineInterface, p: Pet, text: string) => {
-  if (p.asleep || p.faintedAt !== null) return
-  try {
-    await $.audio.speak(text)
-  } catch {}
-}
-
 const quip = (now: number, name: string) => QUIPS[quipIndex(now, QUIPS.length)]?.replaceAll('Tama', name)
 
 const COMMANDS = [
@@ -117,8 +109,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId) return next(e) // subagent turns don't count
-    const { after } = await change($, p => moodBy(p, 2))
-    if (e.durationMs >= 20_000) void say($, after, speech(after))
+    await change($, p => moodBy(p, 2))
     return next(e)
   })
 
@@ -126,11 +117,6 @@ export const register: Register = on => {
     const r = await next(e)
     if (r.isError) await change($, p => moodBy(p, -3))
     return r
-  })
-
-  on('classic.Notification', async ($, e, next) => {
-    void say($, await load($, await $.clock.now()), 'Hey, I need you.')
-    return next(e)
   })
 
   on('command.run', { command: 'pet' }, async ($, e) => {

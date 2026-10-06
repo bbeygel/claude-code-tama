@@ -210,7 +210,6 @@ export const bar = (n: number) => `[${'#'.repeat(Math.round(n / 20)).padEnd(5, '
 
 export const quipIndex = (now: number, count: number) => Math.floor(now / 20_000) % count
 
-export const speech = (p: Pet) => (p.mood >= 70 ? 'All done. That was fun!' : p.mood >= 40 ? 'Done. Your turn.' : 'Done. I feel a bit sad.')
 
 // `/pet name <name>` -> the name, capped so the band stays one line.
 export const nameArg = (args: string) => /^name\s+(.+)$/.exec(args.trim())?.[1]?.trim().slice(0, 20)
