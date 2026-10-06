@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { type Grave, type Pet, ACTION_MS, CH, CW, STAGES, DEATH_AFTER, FRAME, advance, bury, care, face, feed, grid, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, pack, parseCreature, quipIndex, rehatch, stage } from './tama'
+import { type Grave, type Pet, ACTION_MS, ACTION_FRAME, CH, CW, HOME, ROUTINE_MS, STAGES, DEATH_AFTER, FRAME, advance, bury, care, face, feed, grid, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, pack, pose, parseCreature, quipIndex, rehatch, stage } from './tama'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -146,14 +146,23 @@ test('pane LCD: braille pixel art, bob, tomb; a feed action animates then return
   const idle = lcd(p, at)
   expect(idle).toHaveLength(7)
   expect(idle.every(l => l.length <= 21)).toBe(true)
-  expect(lcd(p, at + FRAME)[3]).not.toBe(idle[3]) // bobs one cell
   const z = { ...p, asleep: true }
-  expect(lcd(z, at)[3]).toBe(lcd(z, at + FRAME)[3])
+  expect(lcd(z, at)[3]).toBe(lcd(z, at + 1700)[3])
   expect(lcd({ ...p, faintedAt: 0 }, DEATH_AFTER)[2]).toMatch(/[⠀-⣿]/)
   const a = { kind: 'feed' as const, startedAt: at }
   const frames = [0, 250, 1300, 2000].map(ms => lcd(p, at + ms, a).join('\n'))
   expect(new Set(frames).size).toBe(4)
   expect(lcd(p, at + ACTION_MS, a)).toEqual(lcd(p, at + ACTION_MS))
+})
+
+test('idle routines: x moves, stays on the canvas, never jumps; asleep stays still', () => {
+  const xs = Array.from({ length: 400 }, (_, i) => pose(i * ACTION_FRAME)[0])
+  expect(new Set(xs).size).toBeGreaterThan(5)
+  expect(xs.every(x => x >= 0 && x <= 18)).toBe(true)
+  expect(xs.slice(1).every((x, i) => Math.abs(x - xs[i]!) <= 3)).toBe(true)
+  expect(pose(ROUTINE_MS * 7)[0]).toBe(HOME) // slots start and end at home
+  const z = { ...hatch(0), asleep: true }
+  expect(new Set(xs.map((_, i) => lcd(z, HOUR + i * ACTION_FRAME).slice(1).join())).size).toBe(1)
 })
 
 test('creature grids: a good drawing passes, wrong size or characters are rejected; the LCD uses it', () => {

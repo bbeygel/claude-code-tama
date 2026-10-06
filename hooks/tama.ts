@@ -101,11 +101,27 @@ export const face = (p: Pet, now: number, working: boolean) => {
 }
 
 // The /pet pane's LCD: a mood bubble over a 42x24 pixel canvas packed into braille rows
-// (2x4 dots per cell), bobbing one cell per FRAME while awake; asleep, fainted and dead lie still.
+// (2x4 dots per cell); awake, it runs a random idle routine every ROUTINE_MS; asleep, fainted and dead lie still.
 export const FRAME = 1000
 export type Action = { kind: 'feed' | 'play'; startedAt: number }
 export const ACTION_MS = 2500
 export const ACTION_FRAME = 250
+export const ROUTINE_MS = 6000
+export const HOME = 9 // sprite x at rest: 0..18 fits the 24-wide sprite in 42 dots
+// Idle routines, u in [0,1) through the slot: [dx, dy] off home, 0 at both ends so they chain without a jump.
+const ROUTINES: ((u: number) => [number, number])[] = [
+  u => [9 * Math.sin(2 * Math.PI * u), 0], // walk right, back, left, back
+  u => [0, -6 * Math.abs(Math.sin(3 * Math.PI * u))], // three hops
+  u => [3 * Math.sin(4 * Math.PI * u), 0], // look around
+  () => [0, 0], // rest
+  u => [2 * Math.sin(6 * Math.PI * u), -(Math.floor(12 * u) % 2)], // dance
+]
+// Pure in now: the slot's hash picks the routine, the time within it the pose.
+export const pose = (now: number) => {
+  const k = Math.floor(now / ROUTINE_MS)
+  const [dx, dy] = ROUTINES[(Math.imul(k, 2654435761) >>> 16) % ROUTINES.length]!((now / ROUTINE_MS) % 1)
+  return [HOME + Math.round(dx), Math.round(dy)] as const
+}
 // Eight pixels -> one braille cell (a blank one is a plain space): dot bits by [row][col].
 const DOTS = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]]
 export const pack = (rows: string[]) =>
@@ -183,16 +199,17 @@ const BOUNCE = [19, 13, 7, 13]
 export const lcd = (p: Pet, now: number, action?: Action, cr?: Creature) => {
   const m = mode(p, false)
   const f = Math.floor(now / FRAME) % 2
-  const x = m === 'asleep' || m === 'fainted' ? 3 : 3 + 2 * f
+  const still = m === 'asleep' || m === 'fainted'
   const g = Array<string>(CH).fill('.'.repeat(2 * 21))
   if (isDead(p, now)) return ['', ...pack((stamp(g, TOMB, 13, 4), g))]
   const s = stage(p, now)
   const t = action ? now - action.startedAt : -1
   const k = Math.floor(t / ACTION_FRAME)
   const on = t >= 0 && t < ACTION_MS
+  const [x, py] = still ? [HOME, 0] : on ? [3, 0] : pose(now) // a Feed/Play action pins it left of the props
   let face = FACES[m]
   const sp = SPRITES[s]
-  stamp(g, cr && s !== 'egg' ? cr.sprites[s] : sp.g, x, 0)
+  stamp(g, cr && s !== 'egg' ? cr.sprites[s] : sp.g, x, py)
   if (on && action!.kind === 'feed') {
     const food = FOOD[3 - Math.floor((4 * t) / ACTION_MS)]!
     stamp(g, food, 32, 21 - food.length)
@@ -202,7 +219,7 @@ export const lcd = (p: Pet, now: number, action?: Action, cr?: Creature) => {
     stamp(g, BALL, 34, BOUNCE[k % 4]!)
     face = FACES.happy
   }
-  if (s !== 'egg' && !cr) stamp(g, face, x + sp.fx, sp.fy + CH - 20)
+  if (s !== 'egg' && !cr) stamp(g, face, x + sp.fx, sp.fy + CH - 20 + py)
   return [' '.repeat(13) + BUBBLES[m][f], ...pack(g)]
 }
 

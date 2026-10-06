@@ -1,7 +1,7 @@
 import type { CommandRunInput, EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, stage, tomb } from './tama'
+import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, advance, age, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, stage, tomb } from './tama'
 
 // Raw Ink color names; the pane is where a mod can color (a command reply is plain text).
 const level = (n: number) => (n >= 60 ? 'green' : n >= 30 ? 'yellow' : 'red')
@@ -82,7 +82,7 @@ const burial = async ($: EngineInterface, now: number) => {
 const openPane = async ($: EngineInterface, e: CommandRunInput) => {
   if (e.origin.kind !== 'composer' || !(await $.session.surfaces()).includes('terminal')) return false
   const { isPlaced } = await $.ui.open({ id: PANE, title: 'Tama', focus: true, closeOnEscape: true, rows: 21, columns: 31 })
-  if (isPlaced) anim ??= $.clock.every(FRAME, () => $.ui.invalidate('ui.render')) // the bob; ui.close stops it
+  if (isPlaced) anim ??= $.clock.every(ACTION_FRAME, () => $.ui.invalidate('ui.render')) // idle routines move it each tick; ui.close stops it
   return isPlaced
 }
 
