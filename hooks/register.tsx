@@ -97,6 +97,7 @@ const COMMANDS = [
   { name: 'feed', description: 'Feed Tama', immediate: true },
   { name: 'sleep', description: 'Lights off: Tama sleeps', immediate: true },
   { name: 'wake', description: 'Lights on: wake Tama', immediate: true },
+  { name: 'play', description: 'Play with Tama', immediate: true },
 ] as const
 
 export const register: Register = on => {
@@ -148,6 +149,7 @@ export const register: Register = on => {
   on('command.run', { command: 'feed' }, $ => act($, feed, fed, 'feed'))
   on('command.run', { command: 'sleep' }, $ => act($, p => ({ ...p, asleep: true }), lights))
   on('command.run', { command: 'wake' }, $ => act($, p => ({ ...p, asleep: false }), lights))
+  on('command.run', { command: 'play' }, $ => act($, play, played, 'play'))
 
   on('ui.close', { id: PANE }, ($, e, next) => {
     anim?.cancel()
