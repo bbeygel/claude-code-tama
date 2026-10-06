@@ -191,34 +191,38 @@ export const register: Register = on => {
     )
     const [bg, ink] = dead ? ['#9e9e9e', '#212121'] : p.asleep ? ['#1e3a1e', '#8bac0f'] : ['#9bbc0f', '#0f380f'] // lights off: dark LCD
     return (
-      <Box flexDirection="column" alignItems="center" width={e.props.bodyColumns}>
-        <Text color={SHELL}>{`╭${'─'.repeat(15)}╮`}</Text>
-        {rim('╭──╯', '╰──╮', <Text color={SHELL} bold>{center('T A M A', 15)}</Text>)}
-        {rim('╭─╯', '╰─╮', <Text bold>{center(`${p.name} · ${dead ? 'RIP' : stage(p, now)}`, 21)}</Text>)}
-        {rim('╭╯', '╰╮', <Text dimColor>{center(dead ? 'rest in peace' : `age ${age(now - p.born)} · care ${care(p, now)}%`, 25)}</Text>)}
-        {rim('│  ┌', '┐  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
-        {lcd(p, now, action, cr).map(l =>
-          rim('│  │', '│  │', <Text color={ink} backgroundColor={bg}>{l.padEnd(21).slice(0, 21)}</Text>),
-        )}
-        {rim('│  └', '┘  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
-        {METERS.map(([k, icon, name]) => {
-          const n = Math.round(p[k] / 10)
-          return rim('│', '│', (
-            <Text>
-              {'  '}
-              <Text color={level(p[k])}>{icon}</Text>
-              {` ${name.padEnd(7)}`}
-              <Text color={level(p[k])}>{'█'.repeat(n)}</Text>
-              <Text dimColor>{'░'.repeat(10 - n)}</Text>
-              {` ${String(Math.round(p[k])).padStart(3)}  `}
-            </Text>
-          ))
-        })}
-        {rim('│', '│', <Text>{' '.repeat(27)}</Text>)}
-        {rim('╰╮', '╭╯', <Box width={25} justifyContent="center">{buttons}</Box>)}
-        {rim('╰─╮', '╭─╯', <Text dimColor>{center('tab · enter · esc', 21)}</Text>)}
-        {rim('╰──╮', '╭──╯', <Text>{' '.repeat(15)}</Text>)}
-        <Text color={SHELL}>{`╰${'─'.repeat(15)}╯`}</Text>
+      // One 29-wide column centered once: rows of odd widths centered inside it land on
+      // whole cells, so each corner meets the one above it (centered each in the pane, they didn't).
+      <Box width={e.props.bodyColumns} justifyContent="center">
+        <Box flexDirection="column" alignItems="center" width={29}>
+          <Text color={SHELL}>{`╭${'─'.repeat(15)}╮`}</Text>
+          {rim('╭──╯', '╰──╮', <Text color={SHELL} bold>{center('T A M A', 15)}</Text>)}
+          {rim('╭─╯', '╰─╮', <Text bold>{center(`${p.name} · ${dead ? 'RIP' : stage(p, now)}`, 21)}</Text>)}
+          {rim('╭╯', '╰╮', <Text dimColor>{center(dead ? 'rest in peace' : `age ${age(now - p.born)} · care ${care(p, now)}%`, 25)}</Text>)}
+          {rim('│  ┌', '┐  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
+          {lcd(p, now, action, cr).map(l =>
+            rim('│  │', '│  │', <Text color={ink} backgroundColor={bg}>{l.padEnd(21).slice(0, 21)}</Text>),
+          )}
+          {rim('│  └', '┘  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
+          {METERS.map(([k, icon, name]) => {
+            const n = Math.round(p[k] / 10)
+            return rim('│', '│', (
+              <Text>
+                {'  '}
+                <Text color={level(p[k])}>{icon}</Text>
+                {` ${name.padEnd(7)}`}
+                <Text color={level(p[k])}>{'█'.repeat(n)}</Text>
+                <Text dimColor>{'░'.repeat(10 - n)}</Text>
+                {` ${String(Math.round(p[k])).padStart(3)}  `}
+              </Text>
+            ))
+          })}
+          {rim('│', '│', <Text>{' '.repeat(27)}</Text>)}
+          {rim('╰╮', '╭╯', <Box width={25} justifyContent="center">{buttons}</Box>)}
+          {rim('╰─╮', '╭─╯', <Text dimColor>{center('tab · enter · esc', 21)}</Text>)}
+          {rim('╰──╮', '╭──╯', <Text>{' '.repeat(15)}</Text>)}
+          <Text color={SHELL}>{`╰${'─'.repeat(15)}╯`}</Text>
+        </Box>
       </Box>
     )
   })
