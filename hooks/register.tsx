@@ -1,13 +1,10 @@
 import type { CommandRunInput, EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bar, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, stage, tomb } from './tama'
+import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, stage, tomb } from './tama'
 
-// Raw Ink color names; the band and the pane are where a mod can color (a command reply is plain text).
+// Raw Ink color names; the pane is where a mod can color (a command reply is plain text).
 const level = (n: number) => (n >= 60 ? 'green' : n >= 30 ? 'yellow' : 'red')
-const FACE_COLOR: Record<ReturnType<typeof mode>, string> = {
-  happy: 'magenta', watching: 'cyan', sad: 'blue', tired: 'yellow', hungry: 'red', asleep: 'gray', fainted: 'red',
-}
 
 // The /pet pane: an egg-shaped device, 29 cells at its widest, 21 rows.
 const PANE = 'tama'
@@ -106,7 +103,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     for (const c of COMMANDS) await $.command.register(c)
     await change($, p => p) // persists the egg on first sight and the time simulated since
-    // One redraw tick for the spinner quip and the idle band (lazy decay, quip rotation).
+    // One redraw tick for the spinner quip (lazy decay, quip rotation).
     $.clock.every(20_000, () => $.ui.invalidate('ui.render'))
     return next(e)
   })
@@ -231,39 +228,5 @@ export const register: Register = on => {
     const p = await load($, now)
     if (p.asleep || isDead(p, now)) return next(e)
     return next({ ...e, props: { ...e.props, suffix: `${e.props.suffix} · ${quip(now, p.name)}` } })
-  })
-
-  // Compose: our rows on top, whatever the plugins beneath (or the engine) drew below.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const under = await next(e)
-    if (e.props.hasSurvey) return under
-    const now = await $.clock.now()
-    const p = await load($, now)
-    const { Box, Text } = $.ui.resolve(e)
-    if (isDead(p, now))
-      return (
-        <Box flexDirection="column">
-          {headstone(tomb(p)).map(l => (
-            <Text dimColor>{l}</Text>
-          ))}
-          {under}
-        </Box>
-      )
-    return (
-      <Box flexDirection="column">
-        <Box flexDirection="row">
-          <Text color={FACE_COLOR[mode(p, e.props.isWorking)]} bold>{`${face(p, now, e.props.isWorking)} `}</Text>
-          <Text color="cyan" bold>{p.name}</Text>
-          {(['hunger', 'energy', 'mood'] as const).map(k => (
-            <Text>
-              <Text dimColor>{`  ${k} `}</Text>
-              <Text color={level(p[k])}>{bar(p[k])}</Text>
-            </Text>
-          ))}
-        </Box>
-        {e.props.isWorking || p.asleep ? null : <Text dimColor>{quip(now, p.name)}</Text>}
-        {under}
-      </Box>
-    )
   })
 }

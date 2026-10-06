@@ -6,7 +6,7 @@
     {
       "name": "tama",
       "source": "./",
-      "description": "Tamagotchi companion: fed by finished turns, shown above the prompt and in the spinner, /pet for its device"
+      "description": "Tamagotchi companion: fed by finished turns, quips in the spinner, /pet for its device"
     }
   ]
 }
