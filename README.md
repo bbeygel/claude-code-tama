@@ -1,6 +1,6 @@
 # Tama
 
-A Tamagotchi that lives in Claude Code. It shows above the prompt and in the spinner, cheers up when Claude finishes a turn, sulks when a tool fails, gets hungry and sleepy on a real clock, grows from egg to adult, and dies if you leave it fainted for 24 hours.
+A Tamagotchi that lives in Claude Code. It talks in the spinner, cheers up when Claude finishes a turn, sulks when a tool fails, gets hungry and sleepy on a real clock, grows from egg to adult, and dies if you leave it fainted for 24 hours.
 
 Requires Claude Code v2.1.287 or later (mods).
 

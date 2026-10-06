@@ -1,6 +1,6 @@
 {
   "name": "tama",
   "version": "0.1.0",
-  "description": "Tamagotchi companion: fed by finished turns, shown above the prompt and in the spinner, /pet for its card",
+  "description": "Tamagotchi companion: fed by finished turns, quips in the spinner, /pet for its card",
   "author": { "name": "beygel" }
 }

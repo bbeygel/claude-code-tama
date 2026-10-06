@@ -1,13 +1,10 @@
 import type { CommandRunInput, EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bar, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, stage, tomb } from './tama'
+import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, FRAME, advance, age, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, stage, tomb } from './tama'
 
-// Raw Ink color names; the band and the pane are where a mod can color (a command reply is plain text).
+// Raw Ink color names; the pane is where a mod can color (a command reply is plain text).
 const level = (n: number) => (n >= 60 ? 'green' : n >= 30 ? 'yellow' : 'red')
-const FACE_COLOR: Record<ReturnType<typeof mode>, string> = {
-  happy: 'magenta', watching: 'cyan', sad: 'blue', tired: 'yellow', hungry: 'red', asleep: 'gray', fainted: 'red',
-}
 
 // The /pet pane: an egg-shaped device, 29 cells at its widest, 21 rows.
 const PANE = 'tama'
@@ -106,7 +103,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     for (const c of COMMANDS) await $.command.register(c)
     await change($, p => p) // persists the egg on first sight and the time simulated since
-    // One redraw tick for the spinner quip and the idle band (lazy decay, quip rotation).
+    // One redraw tick for the spinner quip (lazy decay, quip rotation).
     $.clock.every(20_000, () => $.ui.invalidate('ui.render'))
     return next(e)
   })
@@ -194,34 +191,38 @@ export const register: Register = on => {
     )
     const [bg, ink] = dead ? ['#9e9e9e', '#212121'] : p.asleep ? ['#1e3a1e', '#8bac0f'] : ['#9bbc0f', '#0f380f'] // lights off: dark LCD
     return (
-      <Box flexDirection="column" alignItems="center" width={e.props.bodyColumns}>
-        <Text color={SHELL}>{`╭${'─'.repeat(15)}╮`}</Text>
-        {rim('╭──╯', '╰──╮', <Text color={SHELL} bold>{center('T A M A', 15)}</Text>)}
-        {rim('╭─╯', '╰─╮', <Text bold>{center(`${p.name} · ${dead ? 'RIP' : stage(p, now)}`, 21)}</Text>)}
-        {rim('╭╯', '╰╮', <Text dimColor>{center(dead ? 'rest in peace' : `age ${age(now - p.born)} · care ${care(p, now)}%`, 25)}</Text>)}
-        {rim('│  ┌', '┐  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
-        {lcd(p, now, action, cr).map(l =>
-          rim('│  │', '│  │', <Text color={ink} backgroundColor={bg}>{l.padEnd(21).slice(0, 21)}</Text>),
-        )}
-        {rim('│  └', '┘  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
-        {METERS.map(([k, icon, name]) => {
-          const n = Math.round(p[k] / 10)
-          return rim('│', '│', (
-            <Text>
-              {'  '}
-              <Text color={level(p[k])}>{icon}</Text>
-              {` ${name.padEnd(7)}`}
-              <Text color={level(p[k])}>{'█'.repeat(n)}</Text>
-              <Text dimColor>{'░'.repeat(10 - n)}</Text>
-              {` ${String(Math.round(p[k])).padStart(3)}  `}
-            </Text>
-          ))
-        })}
-        {rim('│', '│', <Text>{' '.repeat(27)}</Text>)}
-        {rim('╰╮', '╭╯', <Box width={25} justifyContent="center">{buttons}</Box>)}
-        {rim('╰─╮', '╭─╯', <Text dimColor>{center('tab · enter · esc', 21)}</Text>)}
-        {rim('╰──╮', '╭──╯', <Text>{' '.repeat(15)}</Text>)}
-        <Text color={SHELL}>{`╰${'─'.repeat(15)}╯`}</Text>
+      // One 29-wide column centered once: rows of odd widths centered inside it land on
+      // whole cells, so each corner meets the one above it (centered each in the pane, they didn't).
+      <Box width={e.props.bodyColumns} justifyContent="center">
+        <Box flexDirection="column" alignItems="center" width={29}>
+          <Text color={SHELL}>{`╭${'─'.repeat(15)}╮`}</Text>
+          {rim('╭──╯', '╰──╮', <Text color={SHELL} bold>{center('T A M A', 15)}</Text>)}
+          {rim('╭─╯', '╰─╮', <Text bold>{center(`${p.name} · ${dead ? 'RIP' : stage(p, now)}`, 21)}</Text>)}
+          {rim('╭╯', '╰╮', <Text dimColor>{center(dead ? 'rest in peace' : `age ${age(now - p.born)} · care ${care(p, now)}%`, 25)}</Text>)}
+          {rim('│  ┌', '┐  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
+          {lcd(p, now, action, cr).map(l =>
+            rim('│  │', '│  │', <Text color={ink} backgroundColor={bg}>{l.padEnd(21).slice(0, 21)}</Text>),
+          )}
+          {rim('│  └', '┘  │', <Text color={SHELL}>{'─'.repeat(21)}</Text>)}
+          {METERS.map(([k, icon, name]) => {
+            const n = Math.round(p[k] / 10)
+            return rim('│', '│', (
+              <Text>
+                {'  '}
+                <Text color={level(p[k])}>{icon}</Text>
+                {` ${name.padEnd(7)}`}
+                <Text color={level(p[k])}>{'█'.repeat(n)}</Text>
+                <Text dimColor>{'░'.repeat(10 - n)}</Text>
+                {` ${String(Math.round(p[k])).padStart(3)}  `}
+              </Text>
+            ))
+          })}
+          {rim('│', '│', <Text>{' '.repeat(27)}</Text>)}
+          {rim('╰╮', '╭╯', <Box width={25} justifyContent="center">{buttons}</Box>)}
+          {rim('╰─╮', '╭─╯', <Text dimColor>{center('tab · enter · esc', 21)}</Text>)}
+          {rim('╰──╮', '╭──╯', <Text>{' '.repeat(15)}</Text>)}
+          <Text color={SHELL}>{`╰${'─'.repeat(15)}╯`}</Text>
+        </Box>
       </Box>
     )
   })
@@ -231,39 +232,5 @@ export const register: Register = on => {
     const p = await load($, now)
     if (p.asleep || isDead(p, now)) return next(e)
     return next({ ...e, props: { ...e.props, suffix: `${e.props.suffix} · ${quip(now, p.name)}` } })
-  })
-
-  // Compose: our rows on top, whatever the plugins beneath (or the engine) drew below.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const under = await next(e)
-    if (e.props.hasSurvey) return under
-    const now = await $.clock.now()
-    const p = await load($, now)
-    const { Box, Text } = $.ui.resolve(e)
-    if (isDead(p, now))
-      return (
-        <Box flexDirection="column">
-          {headstone(tomb(p)).map(l => (
-            <Text dimColor>{l}</Text>
-          ))}
-          {under}
-        </Box>
-      )
-    return (
-      <Box flexDirection="column">
-        <Box flexDirection="row">
-          <Text color={FACE_COLOR[mode(p, e.props.isWorking)]} bold>{`${face(p, now, e.props.isWorking)} `}</Text>
-          <Text color="cyan" bold>{p.name}</Text>
-          {(['hunger', 'energy', 'mood'] as const).map(k => (
-            <Text>
-              <Text dimColor>{`  ${k} `}</Text>
-              <Text color={level(p[k])}>{bar(p[k])}</Text>
-            </Text>
-          ))}
-        </Box>
-        {e.props.isWorking || p.asleep ? null : <Text dimColor>{quip(now, p.name)}</Text>}
-        {under}
-      </Box>
-    )
   })
 }
