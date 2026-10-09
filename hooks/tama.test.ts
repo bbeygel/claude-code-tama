@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { type Grave, type Pet, ACTION_MS, ACTION_FRAME, CH, CW, HOME, ROUTINE_MS, STAGES, DEATH_AFTER, FRAME, advance, bury, care, face, feed, grid, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, pack, pose, parseCreature, quipIndex, rehatch, stage } from './tama'
+import { type Action, type Grave, type Pet, ACTION_MS, ACTION_FRAME, CH, CW, HOME, ROUTINE_MS, STAGES, DEATH_AFTER, FRAME, advance, bury, canPlay, care, face, feed, grid, hatch, headstone, isDead, lcd, mode, moodBy, nameArg, pack, play, pose, parseCreature, quipIndex, rehatch, sleep, stage } from './tama'
 
 const MIN = 60_000
 const HOUR = 60 * MIN
@@ -32,14 +32,152 @@ test('a stored pet lives through 10 h of no session, read back via /pet', async 
   expect(out.text).toContain('Fainted! /feed to revive.')
 })
 
-test('/feed: fills, overfeeding sulks, revives a fainted pet', () => {
+test('/feed: +2 mood when it fits, half the overflow off when it spills, revives a fainted pet', () => {
   const p = hatch(0)
-  expect(feed(p).hunger).toBe(100)
-  expect(feed(p).mood).toBe(82)
-  expect(feed({ ...p, hunger: 95 }).mood).toBe(75)
-  const back = feed({ ...p, hunger: 0, faintedAt: 5 })
-  expect(back.faintedAt).toBe(null)
-  expect(back.hunger).toBe(25)
+  expect(feed({ ...p, hunger: 50 })).toMatchObject({ hunger: 75, mood: 82 })
+  expect(feed({ ...p, hunger: 80 })).toMatchObject({ hunger: 100, mood: 77.5 })
+  expect(feed({ ...p, hunger: 100 })).toMatchObject({ hunger: 100, mood: 67.5 })
+  expect(feed({ ...p, hunger: 0, faintedAt: 5 })).toMatchObject({ hunger: 25, mood: 82, faintedAt: null })
+})
+
+test('sleep: refused while awake above 50 energy', () => {
+  const p = { ...hatch(0), energy: 51 }
+  expect(sleep(p)).toBe(p)
+  expect(sleep({ ...p, energy: 50 }).asleep).toBe(true)
+  expect(sleep({ ...p, asleep: true }).asleep).toBe(true)
+})
+
+test('play: gain from mood and energy before the game, costs 5 energy and 3 hunger; refused asleep, fainted or hungry', () => {
+  const p = hatch(0)
+  expect(play({ ...p, mood: 20, energy: 80, hunger: 80 })).toMatchObject({ mood: 28, energy: 75, hunger: 77 })
+  expect(play({ ...p, mood: 90, energy: 10, hunger: 80 })).toMatchObject({ mood: 83.5, energy: 5, hunger: 77 })
+  expect(play({ ...p, energy: 3 }).energy).toBe(0)
+  expect(canPlay({ ...p, hunger: 30 })).toBe(true)
+  expect(play({ ...p, hunger: 30 }).hunger).toBe(27)
+  for (const q of [{ ...p, hunger: 29 }, { ...p, asleep: true }, { ...p, faintedAt: 5 }]) {
+    expect(canPlay(q)).toBe(false)
+    expect(play(q)).toBe(q)
+  }
+})
+
+const NO_SLEEP = /^\(  \) Tama: "(I'm not tired!|Stop making me go to bed!|Bed\? It's not even dark\.|Five more minutes… of being awake\.)"$/
+// The stored pet as the card shows it (sdk origin: no pane).
+const shown = async ($: any) => (await run($, 'pet')).text as string
+
+test('/sleep: a rested pet says no and stays awake', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  mock.store(on, { pet: { ...hatch(0), energy: 80 } })
+  const card = await shown($)
+  expect((await run($, 'sleep')).text).toMatch(NO_SLEEP)
+  expect(await shown($)).toBe(card)
+  expect(card).toContain('awake')
+})
+
+test('/sleep: a tired pet goes to bed; /wake gets it up', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  mock.store(on, { pet: { ...hatch(0), energy: 40 } })
+  expect((await run($, 'sleep')).text).toMatch(/^\(  \) zzz Tama: "(Night night\.|Lights out!)"$/)
+  expect(await shown($)).toContain('asleep')
+  expect((await run($, 'wake')).text).toMatch(/^\(  \) Tama: "(Morning!|I'm up, I'm up\.)"$/)
+})
+
+test('/play: two in a row read differently and carry the signed mood change', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  mock.store(on, { pet: { ...hatch(0), mood: 20, energy: 80 } })
+  const a: string = (await run($, 'play')).text
+  const b: string = (await run($, 'play')).text
+  expect(a).toMatch(/^\(  \) Tama: "(Again! Again!|Best game ever!|Wheee!)" mood \+8$/)
+  expect(b).toMatch(/: "(Again! Again!|Best game ever!|Wheee!)" mood \+7$/)
+  expect(a.split('"')[1]).not.toBe(b.split('"')[1])
+})
+
+test('/play tired and happy: mood goes down, shown with a minus', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  mock.store(on, { pet: { ...hatch(0), mood: 90, energy: 10 } })
+  expect((await run($, 'play')).text).toMatch(/: "(So… sleepy…|Can we stop now\?)" mood −7$/)
+})
+
+test('/play while hungry: refused, stats unchanged', async ($, on) => {
+  mock.clock(on, { now: 0 })
+  mock.store(on, { pet: { ...hatch(0), hunger: 29 } })
+  const card = await shown($)
+  expect((await run($, 'play')).text).toMatch(/: "(Too hungry to play…|Snack first, then games\.|My tummy says no\.)"$/)
+  expect(await shown($)).toBe(card)
+})
+
+const reply = async ($: any, on: any, pet: Pet, command: string) => {
+  mock.clock(on, { now: 0 })
+  mock.store(on, { pet })
+  return (await run($, command)).text as string
+}
+
+test('/feed replies: yum when it fits, stuffed when it spills, back when fainted', async ($, on) => {
+  expect(await reply($, on, { ...hatch(0), hunger: 50 }, 'feed')).toMatch(/^\(  \) Tama: "(Yum!|Nom nom nom\.|My favorite!)"$/)
+})
+test('/feed reply when it spills', async ($, on) => {
+  expect(await reply($, on, { ...hatch(0), hunger: 90 }, 'feed')).toMatch(/: "(I'm stuffed…|No more, please!|Ugh, my tummy\.)"$/)
+})
+test('/feed reply when fainted', async ($, on) => {
+  expect(await reply($, on, { ...hatch(0), hunger: 0, faintedAt: 0 }, 'feed')).toMatch(/: "Food! I'm back!"$/)
+})
+test('/play reply when asleep', async ($, on) => {
+  expect(await reply($, on, { ...hatch(0), asleep: true }, 'play')).toMatch(/: "(zzz…|Shh, dreaming\.)"$/)
+})
+test('/play reply when fainted', async ($, on) => {
+  expect(await reply($, on, { ...hatch(0), faintedAt: 0 }, 'play')).toMatch(/: "…" Out cold\. Feed it!$/)
+})
+
+// The pane up (so animations run), then a button pressed: the pane's texts and button labels before and after, and the toast.
+const press = async ($: any, on: any, pet: Pet, key: string) => {
+  mock.clock(on, { now: HOUR })
+  mock.store(on, { pet })
+  const toasts: string[] = []
+  on('session.surfaces', async () => ({ value: ['terminal'] }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.toast', async (_: any, e: any) => (toasts.push(e.text), { value: undefined }))
+  await $.command.run({ command: 'pet', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+  const props = { title: 'Tama', isFocused: true, bodyColumns: 31, placement: 'dock', scroll: { offset: 0, bodyRows: 21 }, view: {} }
+  const mount = () => $.ui.mount({ plugin: 'tama', surface: 'terminal', component: 'Pane', requestId: 'tama', props })
+  const texts = async () => {
+    const ui = await mount()
+    const t: string[] = [...(await ui.findAll({ type: 'Text' })), ...(await ui.findAll({ type: 'Button' }))].map((x: any) => x.text)
+    await ui.unmount()
+    return t
+  }
+  const before = await texts()
+  const ui = await mount()
+  await ui.press({ key })
+  await ui.unmount()
+  return { before, after: await texts(), toast: toasts.at(-1) }
+}
+// The LCD rows of the pane's texts: between the `┌` and `└` border rows, less the side rims.
+const screen = (t: string[]) => t.slice(t.indexOf('│  ┌') + 3, t.indexOf('│  └')).filter(x => x !== '│  │')
+const drawn = (lines: string[]) => lines.map(l => l.padEnd(21).slice(0, 21))
+
+test('Play pressed on the pane while hungry: no ball, stats unchanged', async ($, on) => {
+  const { before, after } = await press($, on, { ...hatch(HOUR), hunger: 20 }, 'play')
+  expect(after).toEqual(before)
+})
+
+test('Play pressed on the pane when fed: the ball animates', async ($, on) => {
+  const p = { ...hatch(HOUR), hunger: 80 }
+  const { after } = await press($, on, p, 'play')
+  const ball: Action = { kind: 'play', startedAt: HOUR }
+  expect(screen(after)).toEqual(drawn(lcd(play(p), HOUR, ball)))
+  expect(screen(after)).not.toEqual(drawn(lcd(play(p), HOUR)))
+})
+
+test('Sleep pressed on the pane while rested: refused, stays awake', async ($, on) => {
+  const { after, toast } = await press($, on, { ...hatch(HOUR), energy: 80 }, 'sleep')
+  expect(toast).toMatch(NO_SLEEP)
+  expect(after).toContain('Sleep')
+})
+
+test('Wake pressed on the pane while asleep: wakes', async ($, on) => {
+  const { before, after, toast } = await press($, on, { ...hatch(HOUR), asleep: true }, 'sleep')
+  expect(toast).toMatch(/^\(  \) Tama: "(Morning!|I'm up, I'm up\.)"$/)
+  expect(before).toContain('Wake')
+  expect(after).toContain('Sleep')
 })
 
 // hatch(0) left alone: hunger hits 0 at 8 h, so it dies at 8 h + 24 h fainted.
