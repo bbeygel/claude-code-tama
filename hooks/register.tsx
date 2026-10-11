@@ -1,7 +1,7 @@
 import type { CommandRunInput, EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, advance, age, bury, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, stage, tomb } from './tama'
+import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, advance, age, bury, canPlay, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, MEAL, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, sleep, stage, tomb } from './tama'
 
 // Raw Ink color names; the pane is where a mod can color (a command reply is plain text).
 const level = (n: number) => (n >= 60 ? 'green' : n >= 30 ? 'yellow' : 'red')
@@ -38,18 +38,44 @@ const change = async ($: EngineInterface, fn: (p: Pet, now: number) => Pet) => {
 const act = async ($: EngineInterface, fn: (p: Pet) => Pet, line: (b: Pet, a: Pet, now: number) => string, kind?: Action['kind']) => {
   const { before, after, now } = await change($, fn)
   // Animate only accepted actions, and only with the pane up (anim); a faster tick runs just meanwhile.
-  if (kind && anim && !isDead(before, now) && !(kind === 'play' && (before.asleep || before.faintedAt !== null))) {
+  if (kind && anim && !isDead(before, now) && !(kind === 'play' && !canPlay(before))) {
     action = { kind, startedAt: now }
     const t = $.clock.every(ACTION_FRAME, () => $.ui.invalidate('ui.render'))
     $.clock.after(ACTION_MS + ACTION_FRAME, () => t.cancel())
   }
   return { text: isDead(before, now) ? `${before.name} is gone.` : line(before, after, now) }
 }
-const fed = (b: Pet, a: Pet, now: number) =>
-  `${face(a, now, false)} ${b.name} ${b.faintedAt !== null ? 'comes round and eats!' : b.hunger >= 90 ? 'is stuffed and grumpy.' : 'munches happily.'}`
-const lights = (b: Pet, a: Pet, now: number) => `${face(a, now, false)} ${a.asleep ? `Lights off. ${a.name} is asleep.` : `${a.name} is up.`}`
-const played = (b: Pet, a: Pet, now: number) =>
-  `${face(a, now, false)} ${a.name} ${b.asleep ? 'is asleep.' : b.faintedAt !== null ? 'is out cold. Feed it!' : 'plays! mood +10'}`
+// Tama's own words; a set of several lines takes turns, so it never says the same one twice in a row.
+const NO_SLEEP = ["I'm not tired!", 'Stop making me go to bed!', "Bed? It's not even dark.", 'Five more minutes… of being awake.']
+const NIGHT = ['Night night.', 'Lights out!']
+const MORNING = ['Morning!', "I'm up, I'm up."]
+const DREAMING = ['zzz…', 'Shh, dreaming.']
+const OUT_COLD = ['…']
+const STARVING = ['Too hungry to play…', 'Snack first, then games.', 'My tummy says no.']
+const FUN = ['Again! Again!', 'Best game ever!', 'Wheee!']
+const WORN = ['So… sleepy…', 'Can we stop now?']
+const YUM = ['Yum!', 'Nom nom nom.', 'My favorite!']
+const STUFFED = ["I'm stuffed…", 'No more, please!', 'Ugh, my tummy.']
+const REVIVED = ["Food! I'm back!"]
+const turns = new Map<string[], number>()
+const pick = (lines: string[]) => {
+  const n = turns.get(lines) ?? 0
+  turns.set(lines, n + 1)
+  return lines[n % lines.length]!
+}
+const say = (a: Pet, now: number, lines: string[]) => `${face(a, now, false)} ${a.name}: "${pick(lines)}"`
+const fed = (b: Pet, a: Pet, now: number) => say(a, now, b.faintedAt !== null ? REVIVED : b.hunger + MEAL > 100 ? STUFFED : YUM)
+// /sleep and the pane's toggle; /wake always wakes.
+const lights = (b: Pet, a: Pet, now: number) => say(a, now, a.asleep ? NIGHT : b.asleep ? MORNING : NO_SLEEP)
+const woke = (b: Pet, a: Pet, now: number) => say(a, now, MORNING)
+const played = (b: Pet, a: Pet, now: number) => {
+  if (b.asleep) return say(a, now, DREAMING)
+  if (b.faintedAt !== null) return `${say(a, now, OUT_COLD)} Out cold. Feed it!`
+  if (!canPlay(b)) return say(a, now, STARVING)
+  const n = Math.round(Math.abs(a.mood - b.mood))
+  const down = n > 0 && a.mood < b.mood
+  return `${say(a, now, down ? WORN : FUN)} mood ${down ? '−' : '+'}${n}`
+}
 
 // Asks a model to draw the creature; the pet changes only if every grid checks out.
 const draw = async ($: EngineInterface, desc: string) => {
@@ -147,8 +173,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'feed' }, $ => act($, feed, fed, 'feed'))
-  on('command.run', { command: 'sleep' }, $ => act($, p => ({ ...p, asleep: true }), lights))
-  on('command.run', { command: 'wake' }, $ => act($, p => ({ ...p, asleep: false }), lights))
+  on('command.run', { command: 'sleep' }, $ => act($, sleep, lights))
+  on('command.run', { command: 'wake' }, $ => act($, p => ({ ...p, asleep: false }), woke))
   on('command.run', { command: 'play' }, $ => act($, play, played, 'play'))
 
   on('ui.close', { id: PANE }, ($, e, next) => {
@@ -171,7 +197,7 @@ export const register: Register = on => {
     ) : (
       <Box columnGap={1}>
         <Button key="feed" label="Feed" hotkey="f" plain autoFocus onPress={press(() => act($, feed, fed, 'feed'))} />
-        <Button key="sleep" label={p.asleep ? 'Wake' : 'Sleep'} hotkey="s" plain onPress={press(() => act($, q => ({ ...q, asleep: !q.asleep }), lights))} />
+        <Button key="sleep" label={p.asleep ? 'Wake' : 'Sleep'} hotkey="s" plain onPress={press(() => act($, q => (q.asleep ? { ...q, asleep: false } : sleep(q)), lights))} />
         <Button key="play" label="Play" hotkey="p" plain onPress={press(() => act($, play, played, 'play'))} />
       </Box>
     )

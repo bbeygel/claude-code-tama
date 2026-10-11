@@ -59,12 +59,25 @@ export const headstone = (g: Grave) => {
   return [` .${'-'.repeat(w - 2)}. `, `/${' '.repeat(w)}\\`, ...rows.map(r => `|${mid(r)}|`), `|${'_'.repeat(w)}|`]
 }
 
-export const feed = (p: Pet): Pet => ({ ...p, hunger: clamp(p.hunger + 25), mood: clamp(p.mood + (p.hunger >= 90 ? -5 : 2)), faintedAt: null })
+export const MEAL = 25
+// A meal past full costs half the points spilled over 100; one that fits cheers it up.
+export const feed = (p: Pet): Pet => {
+  const over = Math.max(0, p.hunger + MEAL - 100)
+  return { ...p, hunger: clamp(p.hunger + MEAL), mood: clamp(p.mood + (over ? -over / 2 : 2)), faintedAt: null }
+}
 
 export const moodBy = (p: Pet, d: number): Pet => ({ ...p, mood: clamp(p.mood + d) })
 
-// The pane's Play button: a game cheers it up, unless it sleeps or lies fainted.
-export const play = (p: Pet): Pet => (p.asleep || p.faintedAt !== null ? p : moodBy(p, 10))
+// Lights off is refused while it is awake and rested.
+export const sleep = (p: Pet): Pet => (!p.asleep && p.energy > 50 ? p : { ...p, asleep: true })
+
+export const canPlay = (p: Pet) => !p.asleep && p.faintedAt === null && p.hunger >= 30
+
+// A game: mood changes by 10 × (100 − mood)/100 − max(0, 40 − energy)/4, from the stats before it; then −5 energy and −3 hunger.
+export const play = (p: Pet): Pet =>
+  canPlay(p)
+    ? { ...p, mood: clamp(p.mood + (10 * (100 - p.mood)) / 100 - Math.max(0, 40 - p.energy) / 4), energy: clamp(p.energy - 5), hunger: clamp(p.hunger - 3) }
+    : p
 
 export const care = (p: Pet, now: number) => (now > p.born ? Math.round(100 * (1 - p.neglect / (now - p.born))) : 100)
 
