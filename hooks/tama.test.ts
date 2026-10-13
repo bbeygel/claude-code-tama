@@ -7,7 +7,7 @@ const HOUR = 60 * MIN
 const DAY = 24 * HOUR
 const r = Math.round
 const run = ($: any, command: string) =>
-  $.command.run({ command, args: '', origin: { kind: 'sdk' }, presentation: { isFullscreen: false, columns: 80 } })
+  $.command.run({ command, args: '', origin: { kind: 'bridge' }, presentation: { isFullscreen: false, columns: 80 } })
 
 test('10 h with no session open: state read back has lived through them', () => {
   const stored: Pet = JSON.parse(JSON.stringify(hatch(0))) // as $.store hands it back
@@ -61,7 +61,7 @@ test('play: gain from mood and energy before the game, costs 5 energy and 3 hung
 })
 
 const NO_SLEEP = /^\(  \) Tama: "(I'm not tired!|Stop making me go to bed!|Bed\? It's not even dark\.|Five more minutes… of being awake\.)"$/
-// The stored pet as the card shows it (sdk origin: no pane).
+// The stored pet as the card shows it (bridge origin: no pane).
 const shown = async ($: any) => (await run($, 'pet')).text as string
 
 test('/sleep: a rested pet says no and stays awake', async ($, on) => {
@@ -327,4 +327,37 @@ test('a creature change re-hatches a grown pet as an egg, keeping its name', () 
   expect(r.hunger).toBe(80)
   const egg = hatch(0)
   expect(rehatch(egg, MIN)).toBe(egg)
+})
+
+test('/pet in the app opens the device as one SVG with its three buttons', async ($, on) => {
+  mock.clock(on, { now: HOUR })
+  mock.store(on, { pet: { ...hatch(0), name: 'Oleg <3' } })
+  on('session.surfaces', async () => ({ value: ['desktop'] }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  const r = await $.command.run({ command: 'pet', args: '', origin: { kind: 'sdk' }, presentation: { isFullscreen: false, columns: 80 } })
+  expect(r.text ?? '').toBe('')
+  const props = { title: 'Tama', isFocused: true, bodyColumns: 31, placement: 'dock', scroll: { offset: 0, bodyRows: 21 }, view: {} }
+  const ui = await $.ui.mount({ plugin: 'tama', surface: 'desktop', component: 'Pane', requestId: 'tama', props })
+  const svg = String((await ui.find({ type: 'Svg' }))?.props.source)
+  expect(svg).toStartWith('<svg')
+  expect(svg).toContain('Oleg &#60;3')
+  expect(svg).toContain('<rect x=') // LCD pixels
+  expect((await ui.findAll({ type: 'Button' })).map((b: any) => b.text)).toEqual(['Feed', 'Sleep', 'Play'])
+  await ui.unmount()
+})
+
+const pet = async ($: any, on: any, origin: string, surfaces: string[]) => {
+  mock.clock(on, { now: HOUR })
+  mock.store(on, { pet: { ...hatch(0), name: 'Oleg' } })
+  on('session.surfaces', async () => ({ value: surfaces }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  return (await $.command.run({ command: 'pet', args: '', origin: { kind: origin }, presentation: { isFullscreen: false, columns: 80 } })).text ?? ''
+}
+
+test('/pet in a bare -p run (no surface) prints the card', async ($, on) => {
+  expect(await pet($, on, 'sdk', [])).toContain('Oleg')
+})
+
+test('/pet from the composer in the app opens the pane', async ($, on) => {
+  expect(await pet($, on, 'composer', ['desktop'])).toBe('')
 })

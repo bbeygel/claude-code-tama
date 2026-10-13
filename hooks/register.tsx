@@ -1,7 +1,7 @@
 import type { CommandRunInput, EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 
 import { QUIPS } from './quips'
-import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, advance, age, bury, canPlay, card, care, creatureArg, drawPrompt, face, feed, hatch, headstone, isDead, lcd, MEAL, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, sleep, stage, tomb } from './tama'
+import { type Action, type Creature, type Grave, type Pet, ACTION_FRAME, ACTION_MS, advance, age, bury, canPlay, card, care, creatureArg, DOTS, drawPrompt, face, feed, hatch, headstone, isDead, lcd, MEAL, moodBy, nameArg, parseCreature, play, quipIndex, rehatch, sleep, stage, tomb } from './tama'
 
 // Raw Ink color names; the pane is where a mod can color (a command reply is plain text).
 const level = (n: number) => (n >= 60 ? 'green' : n >= 30 ? 'yellow' : 'red')
@@ -18,6 +18,48 @@ const center = (s: string, w: number) => {
 let anim: Timer | undefined
 // The running Feed/Play animation; lcd ignores it once ACTION_MS have passed.
 let action: Action | undefined
+// [background, ink] of the LCD; lights off: dark LCD.
+const lcdColors = (dead: boolean, asleep: boolean) => (dead ? ['#9e9e9e', '#212121'] : asleep ? ['#1e3a1e', '#8bac0f'] : ['#9bbc0f', '#0f380f'])
+
+// The device off the terminal: the app draws text in a proportional font, so the shell's
+// box-drawing rows and the braille LCD can't line up there. One SVG instead: the LCD's
+// braille cells become 5px pixels, the meters real bars; the buttons stay Buttons below it.
+const DEVICE_W = 260
+const HEX = { green: '#66bb6a', yellow: '#fdd835', red: '#ef5350' }
+const esc = (s: string) => s.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`)
+const deviceSvg = (p: Pet, now: number, dead: boolean, cr?: Creature) => {
+  const [bg, ink] = lcdColors(dead, p.asleep)
+  const rows = lcd(p, now, action, cr)
+  const [x0, y0, lh] = [25, 106, rows.length * 20]
+  const pixels = rows
+    .flatMap((row, r) =>
+      [...row].flatMap((ch, c) => {
+        const [x, y, n] = [x0 + c * 10, y0 + r * 20, ch.charCodeAt(0) - 0x2800]
+        if (n > 0 && n < 256) return DOTS.flatMap((d, dy) => d.flatMap((bit, dx) => (n & bit ? [`<rect x="${x + dx * 5}" y="${y + dy * 5}" width="4" height="4"/>`] : [])))
+        return ch.trim() ? [`<text x="${x + 5}" y="${y + 15}" text-anchor="middle" font-weight="bold">${esc(ch)}</text>`] : []
+      }),
+    )
+    .join('')
+  const my = y0 + lh + 40
+  const meters = METERS.map(([k, icon, name], i) => {
+    const [y, v, col] = [my + i * 30, Math.round(p[k]), HEX[level(p[k])]]
+    return (
+      `<text x="30" y="${y}" fill="${col}" font-size="18">${icon}</text><text x="52" y="${y}">${name}</text>` +
+      `<rect x="112" y="${y - 12}" width="84" height="14" rx="3" fill="#3a3740"/><rect x="112" y="${y - 12}" width="${0.84 * v}" height="14" rx="3" fill="${col}"/>` +
+      `<text x="234" y="${y}" text-anchor="end" font-weight="bold">${v}</text>`
+    )
+  }).join('')
+  const h = my + 2 * 30 + 30
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${DEVICE_W}" height="${h}" viewBox="0 0 ${DEVICE_W} ${h}" font-family="ui-monospace, Menlo, monospace" font-size="15" fill="#e0e0e0">` +
+    `<rect x="1.5" y="1.5" width="${DEVICE_W - 3}" height="${h - 3}" rx="44" fill="#1f1d24" stroke="${SHELL}" stroke-width="3"/>` +
+    `<text x="130" y="38" text-anchor="middle" fill="${SHELL}" font-weight="bold" font-size="14" letter-spacing="6">TAMA</text>` +
+    `<text x="130" y="64" text-anchor="middle" font-weight="bold" font-size="18">${esc(`${p.name} · ${dead ? 'RIP' : stage(p, now)}`)}</text>` +
+    `<text x="130" y="86" text-anchor="middle" fill="#9e9e9e" font-size="14">${esc(dead ? 'rest in peace' : `age ${age(now - p.born)} · care ${care(p, now)}%`)}</text>` +
+    `<rect x="${x0 - 7}" y="${y0 - 7}" width="224" height="${lh + 14}" rx="4" fill="${bg}" stroke="${SHELL}" stroke-width="2"/>` +
+    `<g fill="${ink}">${pixels}</g>${meters}</svg>`
+  )
+}
 
 // Defaults under the stored value, so a field added later reads its default.
 const load = async ($: EngineInterface, now: number) =>
@@ -103,10 +145,10 @@ const burial = async ($: EngineInterface, now: number) => {
   return b
 }
 
-// The pane only where it draws: /pet typed at a terminal. Remote Control (bridge), -p and
-// VS Code (sdk), or a pane left unplaced, answer false and the caller prints the card.
+// The pane wherever a surface places it. Remote Control (bridge: the reply goes to the phone),
+// a bare -p (no surface; it would "place" anyway), or a pane left unplaced print the card.
 const openPane = async ($: EngineInterface, e: CommandRunInput) => {
-  if (e.origin.kind !== 'composer' || !(await $.session.surfaces()).includes('terminal')) return false
+  if (e.origin.kind === 'bridge' || !(await $.session.surfaces()).length) return false
   const { isPlaced } = await $.ui.open({ id: PANE, title: 'Tama', focus: true, closeOnEscape: true, rows: 21, columns: 31 })
   if (isPlaced) anim ??= $.clock.every(ACTION_FRAME, () => $.ui.invalidate('ui.render')) // idle routines move it each tick; ui.close stops it
   return isPlaced
@@ -201,7 +243,16 @@ export const register: Register = on => {
         <Button key="play" label="Play" hotkey="p" plain onPress={press(() => act($, play, played, 'play'))} />
       </Box>
     )
-    if (e.surface !== 'terminal' || e.props.bodyColumns < 29)
+    if (e.surface !== 'terminal') {
+      const { Svg } = $.ui.resolve(e)
+      return (
+        <Box flexDirection="column" alignItems="center">
+          <Svg source={deviceSvg(p, now, dead, cr)} alt={`${p.name}: ${dead ? 'rest in peace' : stage(p, now)}`} width={DEVICE_W} />
+          {buttons}
+        </Box>
+      )
+    }
+    if (e.props.bodyColumns < 29)
       return (
         <Box flexDirection="column">
           {(dead ? headstone(tomb(p)) : card(p, now).split('\n')).map(l => (
@@ -217,7 +268,7 @@ export const register: Register = on => {
         <Text color={SHELL}>{r}</Text>
       </Box>
     )
-    const [bg, ink] = dead ? ['#9e9e9e', '#212121'] : p.asleep ? ['#1e3a1e', '#8bac0f'] : ['#9bbc0f', '#0f380f'] // lights off: dark LCD
+    const [bg, ink] = lcdColors(dead, p.asleep)
     return (
       // One 29-wide column centered once: rows of odd widths centered inside it land on
       // whole cells, so each corner meets the one above it (centered each in the pane, they didn't).
