@@ -136,7 +136,7 @@ export const pose = (now: number) => {
   return [HOME + Math.round(dx), Math.round(dy)] as const
 }
 // Eight pixels -> one braille cell (a blank one is a plain space): dot bits by [row][col].
-const DOTS = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]]
+export const DOTS = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]]
 export const pack = (rows: string[]) =>
   Array.from({ length: Math.ceil(rows.length / 4) }, (_, i) =>
     Array.from({ length: Math.ceil(rows[0]!.length / 2) }, (_, j) => {
