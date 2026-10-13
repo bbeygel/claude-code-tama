@@ -30,7 +30,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`)
 const deviceSvg = (p: Pet, now: number, dead: boolean, cr?: Creature) => {
   const [bg, ink] = lcdColors(dead, p.asleep)
   const rows = lcd(p, now, action, cr)
-  const [x0, y0, lh] = [25, 98, rows.length * 20]
+  const [x0, y0, lh] = [25, 106, rows.length * 20]
   const pixels = rows
     .flatMap((row, r) =>
       [...row].flatMap((ch, c) => {
@@ -40,22 +40,22 @@ const deviceSvg = (p: Pet, now: number, dead: boolean, cr?: Creature) => {
       }),
     )
     .join('')
-  const my = y0 + lh + 34
+  const my = y0 + lh + 40
   const meters = METERS.map(([k, icon, name], i) => {
-    const [y, v, col] = [my + i * 24, Math.round(p[k]), HEX[level(p[k])]]
+    const [y, v, col] = [my + i * 30, Math.round(p[k]), HEX[level(p[k])]]
     return (
-      `<text x="34" y="${y}" fill="${col}">${icon}</text><text x="54" y="${y}">${name}</text>` +
-      `<rect x="118" y="${y - 10}" width="90" height="10" rx="2" fill="#3a3740"/><rect x="118" y="${y - 10}" width="${0.9 * v}" height="10" rx="2" fill="${col}"/>` +
-      `<text x="234" y="${y}" text-anchor="end">${v}</text>`
+      `<text x="30" y="${y}" fill="${col}" font-size="18">${icon}</text><text x="52" y="${y}">${name}</text>` +
+      `<rect x="112" y="${y - 12}" width="84" height="14" rx="3" fill="#3a3740"/><rect x="112" y="${y - 12}" width="${0.84 * v}" height="14" rx="3" fill="${col}"/>` +
+      `<text x="234" y="${y}" text-anchor="end" font-weight="bold">${v}</text>`
     )
   }).join('')
-  const h = my + 3 * 24 + 4
+  const h = my + 2 * 30 + 30
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${DEVICE_W}" height="${h}" viewBox="0 0 ${DEVICE_W} ${h}" font-family="ui-monospace, Menlo, monospace" font-size="13" fill="#e0e0e0">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${DEVICE_W}" height="${h}" viewBox="0 0 ${DEVICE_W} ${h}" font-family="ui-monospace, Menlo, monospace" font-size="15" fill="#e0e0e0">` +
     `<rect x="1.5" y="1.5" width="${DEVICE_W - 3}" height="${h - 3}" rx="44" fill="#1f1d24" stroke="${SHELL}" stroke-width="3"/>` +
-    `<text x="130" y="38" text-anchor="middle" fill="${SHELL}" font-weight="bold" letter-spacing="6">TAMA</text>` +
-    `<text x="130" y="60" text-anchor="middle" font-weight="bold" font-size="15">${esc(`${p.name} · ${dead ? 'RIP' : stage(p, now)}`)}</text>` +
-    `<text x="130" y="78" text-anchor="middle" fill="#9e9e9e" font-size="12">${esc(dead ? 'rest in peace' : `age ${age(now - p.born)} · care ${care(p, now)}%`)}</text>` +
+    `<text x="130" y="38" text-anchor="middle" fill="${SHELL}" font-weight="bold" font-size="14" letter-spacing="6">TAMA</text>` +
+    `<text x="130" y="64" text-anchor="middle" font-weight="bold" font-size="18">${esc(`${p.name} · ${dead ? 'RIP' : stage(p, now)}`)}</text>` +
+    `<text x="130" y="86" text-anchor="middle" fill="#9e9e9e" font-size="14">${esc(dead ? 'rest in peace' : `age ${age(now - p.born)} · care ${care(p, now)}%`)}</text>` +
     `<rect x="${x0 - 7}" y="${y0 - 7}" width="224" height="${lh + 14}" rx="4" fill="${bg}" stroke="${SHELL}" stroke-width="2"/>` +
     `<g fill="${ink}">${pixels}</g>${meters}</svg>`
   )
